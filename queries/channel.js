@@ -1,13 +1,19 @@
-const getChannelsQuery = `
-    SELECT id, name, picture FROM channel WHERE NOT ($1 = ANY (followers) OR creator = $1)
+const getChannelsQuery = (type) => `
+    SELECT 
+        id, name, picture 
+    FROM channel
+    WHERE 
+    ${
+    type === 'following' ?
+    '$1 = ANY (followers)' :
+    type === 'created' ?
+    'creator = $1' :
+    'NOT $1 = ANY(array_append(followers, creator))'
+    }
 `
 
-const getFollowingChannelsQuery = `
-    SELECT id, name, picture FROM channel WHERE $1 = ANY (followers)
-`
-
-const getCreatedChannelsQuery = `
-    SELECT id, name, picture FROM channel WHERE creator = $1
+const getChannelIdsQuery = `
+    SELECT array( SELECT id FROM channel WHERE $1 = ANY(array_append(followers, creator)) );
 `
 
 const getChannelInfoQuery = `
@@ -35,56 +41,42 @@ const createChannelPostQuery = `
 
 const followActionQuery = (type) => `
     UPDATE channel
-    SET followers = ${ type === 'follow' ? 'array_append' : 'array_remove' }(followers, $2) 
-    WHERE id = $1 AND creator != $2 AND NOT $2 = ANY(followers)
-`
-
-const getChannelFeedQuery = `
-    SELECT 
-        posts.id, 
-        channel.name AS channel_name, 
-        channel.id AS channel_id,
-        post_desc, 
-        files[0] as thumbnail,
-        picture,
-        cardinality(likes) AS post_likes,
-        cardinality(comments) AS post_comments,
-        $2 = likes.user_id AS liked,
-        shares,
-        date_posted
-    FROM posts
-    JOIN channel ON channel.id = posts.channel_id
-    LEFT JOIN likes ON likes.id = ANY (posts.likes)
-    WHERE posts.channel_id = $1
+        SET followers = ${ type === 'follow' ? 'array_append' : 'array_remove' }(followers, $2) 
+    WHERE id = $1 
+        AND creator != $2 
+        ${ type === 'follow' ? 'AND NOT $2 = ANY(followers)' : '' }
+    RETURNING id as channel_id
 `
 
 const getChannelsFeedQuery = (type) => `
-    WITH channels AS (
-        SELECT id, name FROM channel WHERE ${type === 'explore' ? 'NOT' : ''} ($1 = ANY (followers) OR creator = $1)
-    )
     SELECT 
         posts.id, 
         name AS channel_name, 
         post_desc,
+        picture,
         files[1] AS thumbnail,
-        cardinality(likes) AS post_likes,
-        cardinality(comments) AS post_comments,
-        $1 = likes.user_id AS liked,
-        shares,
+        cardinality(array( SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL )) AS post_likes,
+        cardinality(array( SELECT id FROM comments WHERE post_id = posts.id )) AS post_comments,
+        cardinality(array( SELECT id FROM likes WHERE user_id = $2 AND post_id = posts.id AND comment_id IS NULL )) > 0 AS liked,
+        cardinality(array( SELECT id FROM share WHERE post_id = posts.id )) AS shares,
         date_posted
-    FROM channels
-    JOIN posts ON posts.channel_id = channels.id
-    LEFT JOIN likes ON likes.id = ANY (posts.likes)
+    FROM posts
+    JOIN channel ON channel.id = posts.channel_id
+    WHERE
+    ${
+    type === 'single' ?
+        'posts.channel_id = $1' : 
+        `${ type === 'explore' ? 'NOT' : '' } $1 = ANY (array_append(followers, creator))`
+    }
+    ORDER BY post_likes DESC
 `
 
 module.exports = {
     getChannelsQuery,
-    getFollowingChannelsQuery,
-    getCreatedChannelsQuery,
+    getChannelIdsQuery,
     createChannelQuery,
     createChannelPostQuery,
     getChannelInfoQuery,
     followActionQuery,
-    getChannelFeedQuery,
     getChannelsFeedQuery,
 }

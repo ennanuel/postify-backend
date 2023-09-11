@@ -61,14 +61,14 @@ const getUserPostsQuery = (type) => `
         post_desc,
         post_type,
         post_bg,
-        CARDINALITY(posts.comments) AS comment_count, 
-        CARDINALITY(posts.likes) AS like_count,
-        likes.user_id = $2 AS liked,
-        shares,
+        cardinality(array(SELECT id FROM comments WHERE post_id = posts.id)) AS post_comments, 
+        cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL)) AS post_likes,
+        cardinality(array(SELECT id FROM share WHERE post_id = posts.id)) AS shares,
+        cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $2)) AS liked_post,
         date_posted,
         last_updated,
         posts.user_id,
-        CONCAT(first_name, ' ', last_name) AS name,
+        concat(first_name, ' ', last_name) AS name,
         profile_pic, 
         ${
             type === 'video' || type === 'photo' ?
@@ -78,7 +78,6 @@ const getUserPostsQuery = (type) => `
         active
     FROM posts
     JOIN user_profile ON posts.user_id = user_profile.id
-    LEFT JOIN likes ON likes.id = ANY (posts.likes)
     WHERE posts.user_id = $1
     ${
     type === 'photo' ?
@@ -90,30 +89,24 @@ const getUserPostsQuery = (type) => `
 `
 
 const getUserFriendsQuery = `
-    WITH mutual_friends AS (
-            SELECT 
-            user_profile.id,
-            concat(first_name, ' ', last_name) AS name,
-            user_profile.profile_pic,
-            (
-                SELECT 
-                    array_agg(array1.value)
-                FROM ( SELECT unnest(array_remove(friends, $1)) FROM user_interests WHERE id = $2 ) AS array1(value)
-                JOIN unnest(array_remove(new_interests.friends, $1)) AS array2(value) ON array1.value = array2.value
-            ) AS mutual,
-            user_profile.id = ANY( SELECT unnest(friends) FROM user_interests WHERE id = $2 ) AS is_mutual
-        FROM user_interests
-        JOIN user_profile ON user_profile.id = ANY (user_interests.friends) 
-        JOIN user_interests AS new_interests ON new_interests.id = user_profile.id
-        WHERE user_interests.id = $1
-    )
     SELECT 
-        id,
-        name,
-        profile_pic,
-        array(SELECT profile_pic FROM user_profile WHERE id = ANY (mutual)) AS mutual_pics,
-        id = $2 AS is_user
-    FROM mutual_friends
+        user_profile.id AS user_id,
+        concat(first_name, ' ', last_name) AS name,
+        user_profile.profile_pic,
+        array(
+            SELECT profile_pic FROM user_profile AS profile WHERE profile.id = ANY (array(
+                SELECT 
+                    unnest(array_agg(array1.value))
+                FROM ( SELECT unnest(friends) FROM user_interests WHERE id = $2 ) AS array1(value)
+                JOIN ( SELECT unnest(friends) FROM user_interests WHERE id = user_profile.id ) AS array2(value)
+                    ON array1.value = array2.value
+            ))
+        ) AS mutual_pics,
+        user_profile.id = ANY(array( SELECT unnest(friends) FROM user_interests WHERE id = $2 )) AS is_mutual,
+        user_profile.id = $2 AS is_user
+    FROM user_interests
+    JOIN user_profile ON user_profile.id = ANY (user_interests.friends) 
+    WHERE user_interests.id = $1
 `
 
 const editUserQuery = (entries) => `

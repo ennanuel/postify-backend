@@ -1,16 +1,12 @@
-const { Client } = require('pg');
-const { 
-    getFriendRequestsQuery,
-    getFriendSuggestionQuery, 
-    sendFriendRequestQuery, 
-    addFriendQuery, 
-    removeFriendRequestQuery, 
+const {
     getFriendsQuery, 
-    getSentRequestsQuery, 
-    unfriendQuery,
     getCustomGroupsQuery,
     getCustomGroupInfoQuery,
-    getCustomGroupFriendsQuery
+    getCustomGroupFriendsQuery,
+    getUsersQuery,
+    requestQuery,
+    friendActionQuery,
+    getFriendIdsQuery
 } = require('../queries/friend');
 const runQuery = require('../dbHandler');
 
@@ -18,73 +14,50 @@ const runQuery = require('../dbHandler');
 
 async function getFriends (req, res) {
     const { user_id } = req.params;
-    runQuery({ res, query: getFriendsQuery, values: [user_id] })
+    runQuery.request({ res, query: getFriendsQuery, values: [user_id] })
 };
 
-// FRIEND REQUESTS
+// FRIEND REQUESTS SENT AND RECEIVED
 
-async function getReceivedRequests (req, res) {
+async function getRequests (req, res) {
     const { user_id } = req.params
-    runQuery({ res, query: getFriendRequestsQuery, values: [user_id] })
+    const { type } = req.query || {};
+    runQuery.request({ res, query: getUsersQuery(type), values: [user_id] })
 };
 
-// SENT REQUESTS
-
-async function getSentRequests (req, res) {
-    const { user_id } = req.params;
-    runQuery({ res, query: getSentRequestsQuery, values: [user_id] })
-};
-
-async function getSuggestions (req, res) {
-    const { user_id } = req.params;
-    runQuery({ res, query: getFriendSuggestionQuery, values: [user_id] })
-};
-
-async function unFriend (req, res) {
-    const { user_id, other_user_id } = req.body;
-    runQuery({ res, query: unfriendQuery, values: [user_id, other_user_id], noResult: true })
-};
+async function getUserFriendIds(req, res) {
+    const { user_id } = req.params
+    runQuery.request({ res, query: getFriendIdsQuery, values: [user_id], single: true })
+}
 
 async function getFriendGroups (req, res) {
     const { user_id } = req.params;
-    runQuery({ res, query: getCustomGroupsQuery, values: [user_id] })
+    runQuery.request({ res, query: getCustomGroupsQuery, values: [user_id] })
 };
 
 async function getFriendGroup (req, res) {
     const { group_id } = req.params;
-    runQuery({ res, query: getCustomGroupInfoQuery, values: [group_id], single: true })
+    runQuery.request({ res, query: getCustomGroupInfoQuery, values: [group_id], single: true })
 };
 
 async function getFriendGroupFriends (req, res) {
     const { group_id } = req.params;
-    runQuery({ res, query: getCustomGroupFriendsQuery, values: [group_id] })
+    runQuery.request({ res, query: getCustomGroupFriendsQuery, values: [group_id] })
 };
 
-async function sendFriendRequest (req, res) {
-    const { user_id, other_user_id } = req.body
-    runQuery({ res, query: sendFriendRequestQuery, values: [user_id, other_user_id], noResult: true })
-};
-
-async function acceptFriendRequest (req, res) {
-    const { user_id, other_user_id } = req.body
-    runQuery({ res, query: addFriendQuery, values: [user_id, other_user_id], noResult: true })
-};
-
-async function removeFriendRequest (req, res) {
-    const { user_id, other_user_id } = req.body
-    runQuery({ res, query: removeFriendRequestQuery, values: [user_id, other_user_id], noResult: true })
+async function friendsAction({ type, socket, io, user_id, other_user_id }) {
+    const query = type === 'accept' || type === 'unfriend' ?
+            friendActionQuery(type) :
+            requestQuery(type)
+    runQuery.socket({ socket, io, query: query, values: [user_id, other_user_id], eventName: 'friend-event', extras: { type } })
 };
 
 module.exports = { 
     getFriends, 
-    getReceivedRequests, 
-    getSentRequests, 
-    getSuggestions, 
+    getUserFriendIds,
+    getRequests,
     getFriendGroups, 
     getFriendGroup,
     getFriendGroupFriends,
-    sendFriendRequest,
-    acceptFriendRequest,
-    removeFriendRequest,
-    unFriend
+    friendsAction,
 }

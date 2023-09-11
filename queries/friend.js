@@ -1,167 +1,94 @@
-const getFriendRequestsQuery = `
+const getUsersQuery = (type) => `
     WITH quer1 AS (
-        SELECT users FROM friend_groups 
-        WHERE user_id = $1
-            AND group_type = 'main'
-            AND group_name = 'received_requests'
-    ), quer2 AS (
-        SELECT friends FROM user_interests WHERE id = $1
-    ), quer3 AS (
-        SELECT 
-            user_profile.id, 
-            profile_pic,
-            CONCAT(first_name, ' ', last_name) AS name,
-            user_interests.friends
-        FROM user_profile 
-        JOIN user_interests ON user_interests.id = user_profile.id
-        WHERE user_profile.id = ANY ( SELECT UNNEST(users) FROM quer1 )
-    ), quer4 AS (
-        SELECT id, CONCAT(first_name, ' ', last_name) AS name, profile_pic FROM quer2
-        JOIN user_profile ON user_profile.id = ANY (quer2.friends)
-        WHERE id = ANY ( SELECT UNNEST(friends) FROM quer3 )
-    ), quer5 AS (
-        SELECT 
-            id, 
-            name, 
-            ( SELECT profile_pic FROM quer4 WHERE quer4.id = ANY ( friends ) ) AS mutual_pic
-        FROM quer3
-    )
-    SELECT * FROM quer5;
+        ${
+            type !== 'suggestions' ?
+            `
+                SELECT users FROM friend_groups 
+                WHERE user_id = $1
+                    AND group_type = 'main'
+                    AND group_name = ${type === 'sent' ? "'sent_requests'" : "'received_requests'"}
+            ` :
+            `
+                SELECT 
+                    array_cat( 
+                        array(SELECT unnest(users) FROM friend_groups WHERE user_id = user_interests.id), 
+                        array_append(friends, $1)
+                    ) AS users
+                FROM user_interests WHERE id = $1
+            `
+        }
+    ) SELECT 
+        user_profile.id,
+        concat(first_name, ' ', last_name) AS name,
+        user_profile.profile_pic,
+        array(
+            SELECT profile_pic FROM user_profile WHERE id = ANY (array(
+                SELECT unnest(array_agg(array1.value))
+                FROM unnest(user_interests.friends) AS array1(value)
+                JOIN (SELECT unnest(friends) FROM user_interests WHERE id = $1) AS array2(value) ON array1.value = array2.value
+            ))
+        ) AS mutual_pics
+    FROM user_profile
+    JOIN user_interests ON user_interests.id = user_profile.id
+    WHERE ${ type === 'suggestions' ? 'NOT' : '' } user_interests.id = ANY ( SELECT unnest(users) FROM quer1 )
 `;
 
-const getSentRequestsQuery = `
-    WITH quer1 AS (
-        SELECT users FROM friend_groups 
-        WHERE user_id = $1
-            AND group_type = 'main'
-            AND group_name = 'sent_requests'
-    ), quer2 AS (
-        SELECT friends FROM user_interests WHERE id = $1
-    ), quer3 AS (
-        SELECT 
-            user_profile.id, 
-            profile_pic,
-            CONCAT(first_name, ' ', last_name) AS name,
-            user_interests.friends
-        FROM user_profile 
-        JOIN user_interests ON user_interests.id = user_profile.id
-        WHERE user_profile.id = ANY ( SELECT UNNEST(users) FROM quer1 )
-    ), quer4 AS (
-        SELECT id, CONCAT(first_name, ' ', last_name) AS name, profile_pic FROM quer2
-        JOIN user_profile ON user_profile.id = ANY (quer2.friends)
-        WHERE id = ANY ( SELECT UNNEST(friends) FROM quer3 )
-    ), quer5 AS (
-        SELECT 
-            id, 
-            name, 
-            ( SELECT profile_pic FROM quer4 WHERE quer4.id = ANY ( friends ) ) AS mutual_pic
-        FROM quer3
-    )
-    SELECT * FROM quer5;
+const getFriendIdsQuery = `
+    SELECT array(SELECT unnest(friends) FROM user_interests WHERE id = $1);
 `
 
-const getFriendSuggestionQuery = `
-    WITH quer1 AS (
-        SELECT users FROM friend_groups WHERE user_id = $1
-    ), quer2 AS (
-        SELECT friends FROM user_interests 
-        WHERE NOT (
-            id != $1
-            OR id = ANY ( SELECT UNNEST(users) FROM quer1 )
-        )
-    ), quer3 AS (
-        SELECT 
-            user_profile.id, 
-            profile_pic,
-            CONCAT(first_name, ' ', last_name) AS name,
-            user_interests.friends
-        FROM user_profile 
-        JOIN user_interests ON user_interests.id = user_profile.id
-        WHERE NOT (
-            user_profile.id = ANY ( SELECT UNNEST(users) FROM quer1 )
-            OR user_profile.id = ANY ( SELECT UNNEST(friends) FROM quer2 )
-            OR user_profile.id = $1
-        )
-    ), quer4 AS (
-        SELECT id, CONCAT(first_name, ' ', last_name) AS name, profile_pic FROM quer2
-        JOIN user_profile ON user_profile.id = ANY (quer2.friends)
-        WHERE id = ANY ( SELECT UNNEST(friends) FROM quer3 )
-    ), quer5 AS (
-        SELECT 
-            id, 
-            name, 
-            ( SELECT profile_pic FROM quer4 WHERE quer4.id = ANY ( friends ) ) AS mutual_pic
-        FROM quer3
-    )
-    SELECT * FROM quer5;
-`
-
-const addFriendQuery = `
-    WITH remove_received AS (
-        UPDATE friend_groups
-            SET users = ARRAY_REMOVE(users, $2) 
-            WHERE user_id = $1
-                AND group_type = 'main' 
-                AND group_name = 'received_requests'
-    ), remove_sent AS (
-        UPDATE friend_groups
-            SET users = ARRAY_REMOVE(users, $1) 
-            WHERE user_id = $2
-                AND group_type = 'main' 
-                AND group_name = 'sent_requests'
-    ), add_friend AS (
-        UPDATE user_interests 
-            SET friends = ARRAY_APPEND(friends, $2) 
-            WHERE id = $1
-    ) UPDATE user_interests 
-        SET friends = ARRAY_APPEND(friends, $1) 
-        WHERE id = $2;
-`
-
-const sendFriendRequestQuery = `
-    WITH update_sent AS (
-        UPDATE friend_groups
-            SET users =  ARRAY_APPEND(users, $2) 
-        WHERE user_id = $1
-            AND group_type = 'main' 
-            AND group_name = 'sent_requests'
-    ) UPDATE friend_groups
-        SET users = ARRAY_APPEND(users, $1) 
-    WHERE user_id = $2
-        AND group_type = 'main' 
-        AND group_name = 'received_requests';
-`
-
-const removeFriendRequestQuery = `
-    WITH remove_sent AS (
-        UPDATE friend_groups
-            SET users =  ARRAY_REMOVE(users, $2) 
-        WHERE user_id = $1
-            AND group_type = 'main' 
-            AND group_name = 'sent_requests'
-    ) UPDATE friend_groups
-        SET users = ARRAY_REMOVE(users, $1) 
-    WHERE user_id = $2
-        AND group_type = 'main' 
-        AND group_name = 'received_requests';
-`
-
-const unfriendQuery = `
+const friendActionQuery = (type) => `
     WITH remove_from_groups AS (
         UPDATE friend_groups 
-            SET users = ARRAY_REMOVE(users, $1)
+            SET users = array_remove(users, $1)
         WHERE user_id = $2
+        ${
+            type === 'unfriend' ?
+            '' :
+            `
+            AND group_type = 'main' 
+            AND group_name = 'sent_requests'
+            `
+        }
     ), remove_from_group2 AS (
         UPDATE friend_groups
-            SET users = ARRAY_REMOVE(users, $2)
+            SET users = array_remove(users, $2)
         WHERE user_id = $1
-    ), add_friend AS (
+        ${
+            type === 'unfriend' ?
+            '' :
+            `
+            AND group_type = 'main' 
+            AND group_name = 'received_requests'
+            `
+        }
+    ), remove_friend1 AS (
         UPDATE user_interests 
-            SET friends = ARRAY_REMOVE(friends, $2) 
+            SET friends = ${ type === 'unfriend' ? 'array_remove' : 'array_append' }(friends, $2)
             WHERE id = $1
-    ) UPDATE user_interests 
-        SET friends = ARRAY_REMOVE(friends, $1) 
-        WHERE id = $2;
+    ), remove_friend2 AS (
+        UPDATE user_interests 
+            SET friends = ${ type === 'unfriend' ? 'array_remove' : 'array_append' }(friends, $1) 
+        WHERE id = $2
+    ) SELECT array[$1, $2] AS users
+`
+
+const requestQuery = (type) => `
+    WITH update_sent AS (
+        UPDATE friend_groups
+            SET users =  ${type === 'send' ? 'array_append' : 'array_remove'}(users, $2) 
+        WHERE user_id = $1
+            AND group_type = 'main' 
+            AND group_name = ${ type === 'send' ? "'sent_requests'" : "'received_requests'" }
+            ${ type === 'send' ? 'AND NOT $2 = ANY(users)' : '' }
+    ), update_groups AS (
+        UPDATE friend_groups
+            SET users = ${type === 'send' ? 'array_append' : 'array_remove'}(users, $1) 
+        WHERE user_id = $2
+            AND group_type = 'main' 
+            AND group_name = ${ type === 'send' ? "'received_requests'" : "'sent_requests'" }
+            ${ type = 'send' ? 'AND NOT $2 = ANY (users)' : '' }
+    ) SELECT array[$1, $2] AS users;
 `
 
 const getFriendsQuery = `
@@ -211,13 +138,10 @@ const getCustomGroupFriendsQuery = `
 
 module.exports = {
     getFriendsQuery,
-    getFriendRequestsQuery,
-    getSentRequestsQuery,
-    sendFriendRequestQuery,
-    removeFriendRequestQuery,
-    addFriendQuery,
-    getFriendSuggestionQuery,
-    unfriendQuery,
+    getFriendIdsQuery,
+    getUsersQuery,
+    requestQuery,
+    friendActionQuery,
     getCustomGroupsQuery,
     getCustomGroupInfoQuery,
     getCustomGroupFriendsQuery,

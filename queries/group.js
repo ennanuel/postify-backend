@@ -15,77 +15,63 @@ const getGroupsQuery = (type) => `
     ORDER BY members;
 `
 
+const getGroupIdsQuery = `
+    SELECT array(SELECT id FROM groups WHERE $1 = ANY(members));
+`
+
 const getGroupInfoQuery = (type) => `
-    WITH group_members AS (
-        SELECT profile_pic FROM groups
-        JOIN user_profile ON user_profile.id = ANY( groups.members )
-        WHERE groups.id = $1
-    )
+    SELECT 
+        groups.id, 
+        $2 = creator AS owner,
     ${
         type === 'full' ?
-        `, group_photos AS (
-            SELECT files[1] AS photo FROM posts WHERE group_id = $1
-        )
-        SELECT 
-            groups.id, 
-            group_desc, CONCAT(first_name, \' \', last_name) AS creator, 
-            tags, 
-            CARDINALITY(ARRAY( SELECT profile_pic FROM group_members )) AS members,
-            ARRAY(SELECT photo FROM group_photos WHERE photo IS NOT NULL) AS photos
-        FROM groups
-        JOIN user_profile ON user_profile.id = groups.creator
-        WHERE groups.id = $1` :
-        `SELECT 
-            groups.id, 
-            name, 
-            ARRAY( SELECT profile_pic FROM group_members LIMIT 10) AS member_pics, 
-            creator
-        FROM groups JOIN user_profile ON user_profile.id = groups.creator
-        WHERE groups.id = $1`
+        `group_desc, 
+        concat(first_name, ' ', last_name) AS creator, 
+        tags, 
+        cardinality(array( SELECT profile_pic FROM user_profile WHERE id = ANY (groups.members) )) AS members,
+        array( SELECT files[1] FROM posts WHERE group_id = $1 AND files[1] IS NOT NULL ) AS photos` :
+        `name, 
+        array( SELECT profile_pic FROM user_profile WHERE id = ANY (groups.members) LIMIT 10 ) AS member_pics`
     }
-    
+    FROM groups 
+    ${type === 'full' ? 'JOIN user_profile ON user_profile.id = groups.creator' : ''}
+    WHERE groups.id = $1
 `
 
 const getGroupPostsQuery = (type) => `
-    ${
-        type === 'all' ?
-        `WITH get_groups AS (
-            SELECT id AS group_posts FROM groups 
-            WHERE $1 = ANY (members)
-        )` : ''
-    }
     SELECT 
         ${
             type === 'video' || type === 'photo' ?
             `posts.id, 
             files[1] AS file,
             CARDINALITY(files) AS file_count,
-            CARDINALITY(likes) AS like_count,
-            CARDINALITY(comments) AS comment_count` :
-            `posts.id, 
+            CARDINALITY(array(SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL)) AS like_count,
+            CARDINALITY(array(SELECT id FROM comments WHERE post_id = posts.id)) AS comment_count` :
+            `
+            groups.id AS group_id, 
+            groups.name AS group_name, 
+            posts.user_id,
+            concat(first_name, ' ', last_name) AS name,
+            profile_pic, 
+            active,
+            posts.id, 
             post_desc,
             post_type,
             post_bg,
-            CARDINALITY(posts.comments) AS post_comments, 
-            CARDINALITY(posts.likes) AS post_likes,
-            shares,
-            likes.user_id = posts.user_id AS liked_post,
+            cardinality(array(SELECT id FROM comments WHERE post_id = posts.id)) AS post_comments, 
+            cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL)) AS post_likes,
+            cardinality(array(SELECT id FROM share WHERE post_id = posts.id)) AS shares,
+            cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $1)) AS liked_post,
             date_posted,
-            last_updated,
-            posts.user_id,
-            CONCAT(first_name, ' ', last_name) AS name,
-            profile_pic, 
-            active`
+            last_updated`
         }
     FROM posts 
     JOIN user_profile ON posts.user_id = user_profile.id
-    ${
-        type !== 'video' || type !== 'photo' ? 'LEFT JOIN likes ON likes.id = ANY (posts.likes)' : ''
-    }
+    JOIN groups ON posts.group_id = groups.id
     WHERE
     ${
         type === 'all' ?
-        'posts.group_id = ANY (ARRAY(SELECT group_posts FROM get_groups))' :
+        'posts.group_id = ANY (array( SELECT id FROM groups WHERE $1 = ANY(members) ))' :
         type === 'photo' ?
         'posts.group_id = $1 AND posts.post_type = \'photo\'' :
         type === 'video' ?
@@ -102,9 +88,10 @@ const getMembersQuery = ( type ) => `
 
 const addOrRemoveMemberQuery = ( type ) => `
     UPDATE groups 
-    SET members = ${type === 'add' ? 'ARRAY_APPEND' : 'ARRAY_REMOVE'}(members, $2),
-        invites = ARRAY_REMOVE(invites, $2)
-    WHERE id = $1;
+        SET members = ${type === 'add' ? 'array_append' : 'array_remove'}(members, $1),
+            invites = array_remove(invites, $1)
+    WHERE id = $2
+        ${ type === 'add' ? 'AND NOT $1 = ANY (members)' : '' }
 `
 
 const getGroupInvitesQuery = `
@@ -113,8 +100,9 @@ const getGroupInvitesQuery = `
 
 const addOrRemoveInviteQuery = ( type ) => `
     UPDATE groups 
-        SET invites = ${type == 'add' ? 'ARRAY_APPEND' : 'ARRAY_REMOVE'}(invites, $2) 
-    WHERE id = $1;
+        SET invites = ${type === 'invite' ? 'array_append' : 'array_remove'}(invites, $1) 
+    WHERE id = $2
+        ${ type === 'invite' ? 'AND NOT $1 = ANY(invites)' : '' }
 `
 
 const createGroupQuery = `
@@ -134,6 +122,7 @@ const deleteGroupQuery = `
 
 module.exports = {
     getGroupsQuery,
+    getGroupIdsQuery,
     getGroupInfoQuery,
     getGroupPostsQuery,
     getMembersQuery,

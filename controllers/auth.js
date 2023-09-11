@@ -9,13 +9,13 @@ async function register (req, res) {
 
     const { name, username, email, password } = req.body;
     const [first_name, last_name = ''] = name.split(' ')
-    runQuery({res, query: createUserQuery, values: [ password, first_name, last_name, username, email ]})
+    runQuery.request({res, query: createUserQuery, values: [ password, first_name, last_name, username, email ]})
 }
 
 async function login (req, res) {
     const { username, password } = req.body;
 
-    runQuery({ res, query: loginQuery, values: [password, username], single: true })
+    runQuery.request({ res, query: loginQuery, values: [password, username], single: true })
 }
 
 async function logout (req, res) {
