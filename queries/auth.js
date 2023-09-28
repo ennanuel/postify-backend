@@ -15,15 +15,28 @@ const createUserQuery = `
 `;
 
 const loginQuery = `
-    SELECT user_cred.id, user_profile.first_name, user_profile.last_name, user_profile.username, user_profile.profile_pic
-    FROM user_cred JOIN user_profile ON user_cred.id = user_profile.id
-    WHERE user_cred.password = $1 AND (user_profile.email = $2 OR user_profile.username = $2);
+    SELECT 
+        user_cred.id,
+        user_cred.password AS hashed
+    FROM user_cred 
+    JOIN user_profile ON user_profile.id = user_cred.id
+    WHERE user_profile.email = $1 OR user_profile.username = $1;
 `;
+
+const getUserQuery = `
+    SELECT
+        id,
+        concat(first_name, ' ', last_name) AS name,
+        username,
+        profile_pic
+    FROM user_profile WHERE id = $1
+`
 
 const deleteUserQuery = ``
 
 module.exports = {
     createUserQuery,
     loginQuery,
+    getUserQuery,
     deleteUserQuery,
 }

@@ -1,5 +1,5 @@
 const getGroupsQuery = (type) => `
-    SELECT id, name FROM groups 
+    SELECT id, name, picture FROM groups 
     WHERE 
     ${
         type === 'single' ?
@@ -16,22 +16,26 @@ const getGroupsQuery = (type) => `
 `
 
 const getGroupIdsQuery = `
-    SELECT array(SELECT id FROM groups WHERE $1 = ANY(members));
+    SELECT array(SELECT id FROM groups WHERE $1 = ANY(members)) AS results;
 `
 
 const getGroupInfoQuery = (type) => `
     SELECT 
         groups.id, 
         $2 = creator AS owner,
+        $2 = ANY(members) AS is_member,
+        groups.picture,
+        groups.cover,
+        name,
     ${
         type === 'full' ?
         `group_desc, 
         concat(first_name, ' ', last_name) AS creator, 
         tags, 
         cardinality(array( SELECT profile_pic FROM user_profile WHERE id = ANY (groups.members) )) AS members,
-        array( SELECT files[1] FROM posts WHERE group_id = $1 AND files[1] IS NOT NULL ) AS photos` :
-        `name, 
-        array( SELECT profile_pic FROM user_profile WHERE id = ANY (groups.members) LIMIT 10 ) AS member_pics`
+        array( SELECT files[1] FROM posts WHERE group_id = $1 AND files[1] IS NOT NULL ) AS photos`
+        :
+        'array( SELECT profile_pic FROM user_profile WHERE id = ANY (groups.members) LIMIT 10 ) AS member_pics'
     }
     FROM groups 
     ${type === 'full' ? 'JOIN user_profile ON user_profile.id = groups.creator' : ''}
@@ -58,10 +62,11 @@ const getGroupPostsQuery = (type) => `
             post_desc,
             post_type,
             post_bg,
+            files,
             cardinality(array(SELECT id FROM comments WHERE post_id = posts.id)) AS post_comments, 
             cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL)) AS post_likes,
             cardinality(array(SELECT id FROM share WHERE post_id = posts.id)) AS shares,
-            cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $1)) AS liked_post,
+            cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $2)) > 0 AS liked_post,
             date_posted,
             last_updated`
         }
@@ -106,18 +111,36 @@ const addOrRemoveInviteQuery = ( type ) => `
 `
 
 const createGroupQuery = `
-    INSERT INTO groups ( id, name, group_desc, creator, members, tags, invites ) 
-    VALUES ( uuid_generate_v4(), $2, $3, $1, $4, $5, $6 ) 
+    INSERT INTO groups ( id, name, group_desc, creator, members, tags, invites, picture, cover ) 
+    VALUES ( uuid_generate_v4(), $2, $3, $1, $4, $5, $6, $7, $8 ) 
 `
 
 const editGroupQuery = `
-    UPDATE groups 
-        SET name = $2, group_desc = $3, tags = $4
-    WHERE id = $1
+    UPDATE groups SET
+        name = $3,
+        group_desc = $4,
+        tags = $5,
+        picture = $6,
+        cover = $7
+    WHERE id = $1 AND creator = $2
 `
 
 const deleteGroupQuery = `
-    DELETE FROM groups WHERE id = $1;
+    WITH delete_group AS (
+        DELETE FROM groups WHERE id = $1 AND creator = $2
+        RETURNING id AS group_id, picture, cover
+    ), delete_posts AS (
+        DELETE FROM posts WHERE group_id = ANY(array( SELECT group_id FROM delete_group ))
+        RETURNING id AS post_id, files
+    ), delete_comments AS (
+        DELETE FROM comments WHERE post_id = ANY(array( SELECT post_id FROM delete_posts ))
+    ), delete_likes AS (
+        DELETE FROM likes WHERE post_id = ANY(array( SELECT post_id FROM delete_posts ))
+    ) SELECT
+        picture,
+        cover,
+        array(SELECT unnest(files) FROM delete_posts) AS files
+    FROM delete_group;
 `
 
 module.exports = {

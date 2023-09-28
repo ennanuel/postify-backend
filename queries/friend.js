@@ -34,7 +34,7 @@ const getUsersQuery = (type) => `
 `;
 
 const getFriendIdsQuery = `
-    SELECT array(SELECT unnest(friends) FROM user_interests WHERE id = $1);
+    SELECT array(SELECT unnest(friends) FROM user_interests WHERE id = $1) AS results;
 `
 
 const friendActionQuery = (type) => `

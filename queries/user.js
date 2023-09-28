@@ -12,7 +12,8 @@ const getUserQuery = `
         ARRAY( SELECT profile_pic FROM user_friends WHERE id = ANY (user_interests.friends) ) AS mutual_pics,
         CARDINALITY(ARRAY( SELECT profile_pic FROM user_friends WHERE id = ANY (user_interests.friends) )) AS mutual_friends,
         CARDINALITY(user_interests.friends) AS user_friends,
-        $1 = $2 AS is_user
+        $1 = $2 AS is_user,
+        $1 = ANY(user_interests.friends) AS is_friend
     FROM user_profile 
     JOIN user_interests ON user_profile.id = user_interests.id
     WHERE user_profile.id = $1
@@ -39,7 +40,9 @@ const getFullUserQuery = `
     SELECT 
         user_profile.id,
         profile_pic,
+        cover,
         username,
+        bio,
         concat(first_name, ' ', last_name) AS name,
         array(SELECT id FROM user_friends) AS friend_ids,
         array(SELECT profile_pic FROM user_friends) AS friend_pics,
@@ -47,8 +50,11 @@ const getFullUserQuery = `
         array(SELECT cardinality(mutual) FROM user_friends) AS friend_mutuals,
         array(SELECT file FROM user_posts) AS photos,
         cardinality(user_interests.friends) AS friend_count,
-        school,
+        education,
         hobbies,
+        work,
+        address,
+        country,
         $1 = $2 AS is_user
     FROM user_profile
     JOIN user_interests ON user_profile.id = user_interests.id
@@ -108,9 +114,42 @@ const getUserFriendsQuery = `
     JOIN user_profile ON user_profile.id = ANY (user_interests.friends) 
     WHERE user_interests.id = $1
 `
+const getValuesQuery = `
+    SELECT
+        concat(first_name, ' ', last_name) AS name,
+        username,
+        profile_pic,
+        cover,
+        bio,
+        email,
+        phone,
+        address,
+        country,
+        relationship,
+        work,
+        hobbies,
+        education AS schools
+    FROM user_profile
+    WHERE id = $1
+`
 
-const editUserQuery = (entries) => `
-    UPDATE user_profile SET ${entries.map(([key, value]) => `${key} = ${value}`).join(', ')} 
+const editUserQuery = `
+    UPDATE user_profile SET
+        first_name = $2,
+        last_name = $3,
+        username = $4,
+        profile_pic = $5,
+        cover = $6,
+        bio = $7,
+        email = $8,
+        phone = $9,
+        address = $10,
+        country = $11,
+        relationship = $12,
+        work = $13,
+        hobbies = $14,
+        education = $15
+    WHERE id = $1
 `;
 
 const deleteUserQuery = ``;
@@ -120,6 +159,7 @@ module.exports = {
     getFullUserQuery,
     getUserFriendsQuery,
     getUserPostsQuery,
+    getValuesQuery,
     editUserQuery,
     deleteUserQuery
 }

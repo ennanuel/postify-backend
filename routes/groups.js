@@ -9,6 +9,7 @@ const {
     getGroupPosts,
     getUserGroupIds, 
 } = require('../controllers/group');
+const uploadMiddleware = require('../functions/channel');
 
 const router = express.Router();
 
@@ -17,8 +18,8 @@ router.get('/id/:user_id', getUserGroupIds);
 router.get('/info/:group_id', getGroup);
 router.get('/posts/:group_id', getGroupPosts);
 router.get('/members/:group_id', getGroupMembers);
-router.post('/create', createGroup);
-router.put('/edit', editGroup);
+router.post('/create', uploadMiddleware, createGroup);
+router.put('/edit', uploadMiddleware, editGroup);
 router.delete('/delete', deleteGroup);
 
 module.exports = router;

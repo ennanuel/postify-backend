@@ -1,21 +1,47 @@
-const { Client } = require('pg');
-const { createUserQuery, loginQuery } = require('../queries/auth');
-const runQuery = require('../dbHandler');
+const { createUserQuery, loginQuery, getUserQuery } = require('../queries/auth');
+const postgres = require('../utils/postgres');
+const { validate, hashPassword, createToken } = require('../functions/auth');
 
-async function register (req, res) {
-    for(let [key, values] of Object.entries(req.body)) {
-        if(!values || values === '') return res.status(500).json({ message: `${key} cannot be empty` });
+async function register(req, res) {
+    try {
+        const { name, username, email, password } = req.body;
+        const checkValues = validate({ name, username, email, password })
+        if (checkValues.failed) return res.status(500).json({ message: checkValues.msg });
+        const [first_name, last_name = ''] = name.split(' ')
+        const hashedPassword = await hashPassword(password);
+        const result = await postgres.request({ query: createUserQuery, values: [hashedPassword, first_name, last_name, username, email] });
+    return res.status(200).json(result)        
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
     }
-
-    const { name, username, email, password } = req.body;
-    const [first_name, last_name = ''] = name.split(' ')
-    runQuery.request({res, query: createUserQuery, values: [ password, first_name, last_name, username, email ]})
 }
 
-async function login (req, res) {
-    const { username, password } = req.body;
+async function getUser(req, res) {
+    try {
+        const { user_id } = req.query;
+        const result = await postgres.request({ query: getUserQuery, values: [user_id] });
+        return res.status(200).json(result[0]);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
+}
 
-    runQuery.request({ res, query: loginQuery, values: [password, username], single: true })
+async function login(req, res) {
+    try {
+        const { username, password } = req.body;
+        const result = await postgres.request({
+            query: loginQuery,
+            values: [username],
+        })
+        const user = result[0];
+        const { status, ...others } = await createToken({ res, password, secret: process.env.JWT_SEC, ...user });
+        return res.status(status).json(others);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message })
+    }
 }
 
 async function logout (req, res) {
@@ -25,5 +51,6 @@ async function logout (req, res) {
 module.exports = {
     register,
     login,
-    logout
+    logout,
+    getUser
 }

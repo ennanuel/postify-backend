@@ -8,41 +8,76 @@ const {
     friendActionQuery,
     getFriendIdsQuery
 } = require('../queries/friend');
-const runQuery = require('../dbHandler');
+const postgres = require('../utils/postgres');
 
 // GET FRIENDS
-
 async function getFriends (req, res) {
-    const { user_id } = req.params;
-    runQuery.request({ res, query: getFriendsQuery, values: [user_id] })
+    try { 
+        const { user_id } = req.query;
+        const result = await postgres.request({ query: getFriendsQuery, values: [user_id] });
+        return res.status(200).json(result);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
 // FRIEND REQUESTS SENT AND RECEIVED
-
 async function getRequests (req, res) {
-    const { user_id } = req.params
-    const { type } = req.query || {};
-    runQuery.request({ res, query: getUsersQuery(type), values: [user_id] })
+    try {
+        const { user_id } = req.params;
+        const { type } = req.query || {};
+        const result = await postgres.request({ query: getUsersQuery(type), values: [user_id] });
+        return res.status(200).json(result);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
+// GETS THE IDS OF THE USER'S FRIENDS
 async function getUserFriendIds(req, res) {
-    const { user_id } = req.params
-    runQuery.request({ res, query: getFriendIdsQuery, values: [user_id], single: true })
+    try {
+        const { user_id } = req.params
+        const result = await postgres.request({ query: getFriendIdsQuery, values: [user_id] })
+        return res.status(200).json(result[0])
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 }
 
-async function getFriendGroups (req, res) {
-    const { user_id } = req.params;
-    runQuery.request({ res, query: getCustomGroupsQuery, values: [user_id] })
+async function getFriendGroups(req, res) {
+    try {
+        const { user_id } = req.params;
+        const result = await postgres.request({ query: getCustomGroupsQuery, values: [user_id] })
+        return res.status(200).json(result)
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
 async function getFriendGroup (req, res) {
-    const { group_id } = req.params;
-    runQuery.request({ res, query: getCustomGroupInfoQuery, values: [group_id], single: true })
+    try { 
+        const { group_id } = req.params;
+        const result = await postgres.request({ query: getCustomGroupInfoQuery, values: [group_id] });
+        return res.status(200).json(result[0]);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
 async function getFriendGroupFriends (req, res) {
-    const { group_id } = req.params;
-    runQuery.request({ res, query: getCustomGroupFriendsQuery, values: [group_id] })
+    try {
+        const { group_id } = req.params;
+        const result = await postgres.request({ query: getCustomGroupFriendsQuery, values: [group_id] });
+        return res.status(200).json(result);
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
 async function friendsAction({ type, socket, io, user_id, other_user_id }) {
