@@ -91,38 +91,34 @@ const requestQuery = (type) => `
     ) SELECT array[$1, $2] AS users;
 `
 
-const getFriendsQuery = `
+const getFriendsQuery = (type) => `
     SELECT 
         user_profile.id,
         CONCAT(first_name, ' ', last_name) AS name,
         profile_pic,
         active
     FROM user_profile
-    JOIN user_interests ON user_profile.id = ANY ( user_interests.friends )
-    WHERE user_interests.id = $1
+    ${
+    type === 'custom' ?
+    'WHERE id = ANY(( SELECT unnest(users) FROM friend_groups WHERE id = $1 ));' :
+    'JOIN user_interests ON user_profile.id = ANY (user_interests.friends) WHERE user_interests.id = $1;'
+    }
 `
 
 const getCustomGroupsQuery = `
-    WITH group_friends AS (
-        SELECT 
-            profile_pic, 
-            CONCAT(first_name, ' ', last_name) AS name 
-        FROM friend_groups
-        JOIN user_profile ON user_profile.id = ANY (friend_groups.users)
-        WHERE friend_groups.user_id = $1
-    )
     SELECT 
         id, 
-        group_name, 
-        ARRAY( SELECT profile_pic FROM group_friends LIMIT 5 ) AS friend_pics,
-        ARRAY( SELECT name FROM group_friends LIMIT 3 ) AS friend_names,
-        CARDINALITY(ARRAY( SELECT profile_pic FROM group_friends )) AS friends_count
+        group_name,
+        color,
+        array( SELECT profile_pic FROM user_profile WHERE id = ANY(users) LIMIT 5 ) AS friend_pics,
+        array( SELECT concat(first_name, ' ', last_name) AS name FROM user_profile WHERE id = ANY(users) LIMIT 3 ) AS friend_names,
+        cardinality(users) AS friends_count
     FROM friend_groups
     WHERE user_id = $1 AND group_type = 'custom'
 `
 
-const getCustomGroupInfoQuery = `
-    SELECT id, group_name FROM friend_groups WHERE id = $1;
+const getCustomGroupInfoQuery = (type) => `
+    SELECT id, ${type === 'edit' ? 'users,' : ''} color, group_name FROM friend_groups WHERE id = $1;
 `
 
 const getCustomGroupFriendsQuery = `
@@ -136,6 +132,19 @@ const getCustomGroupFriendsQuery = `
     WHERE friend_groups.id = $1;
 `
 
+const createCustomGroupQuery = `
+    INSERT INTO friend_groups ( id, user_id, group_name, users, color ) VALUES (uuid_generate_v4(), $1, $2, $3, $4 );
+`
+
+const editCustomGroupQuery = `
+    UPDATE friend_groups SET group_name = $3, users = $4, color = $5 WHERE id = $1 AND user_id = $2
+`
+
+const deleteCustomGroupQuery = `
+    DELETE FROM friend_groups WHERE id = $1 AND user_id = $2;
+`
+
+
 module.exports = {
     getFriendsQuery,
     getFriendIdsQuery,
@@ -145,4 +154,7 @@ module.exports = {
     getCustomGroupsQuery,
     getCustomGroupInfoQuery,
     getCustomGroupFriendsQuery,
+    createCustomGroupQuery,
+    editCustomGroupQuery,
+    deleteCustomGroupQuery
 }

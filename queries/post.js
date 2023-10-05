@@ -19,6 +19,7 @@ const getFeedQuery = `
         date_posted,
         last_updated,
         posts.user_id,
+        $1 = posts.user_id AS is_yours,
         concat(first_name, ' ', last_name) AS name,
         profile_pic,
         active 

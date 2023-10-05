@@ -1,4 +1,4 @@
-const { createUserQuery, loginQuery, getUserQuery } = require('../queries/auth');
+const { createUserQuery, loginQuery, getUserQuery, logoutQuery } = require('../queries/auth');
 const postgres = require('../utils/postgres');
 const { validate, hashPassword, createToken } = require('../functions/auth');
 
@@ -45,7 +45,9 @@ async function login(req, res) {
 }
 
 async function logout (req, res) {
-
+    const { userToken } = req.cookies;
+    await postgres.request({ query: logoutQuery, values: [userToken] });
+    return res.status(200).json({ message: 'user logged out'})
 }
 
 module.exports = {

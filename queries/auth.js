@@ -32,6 +32,14 @@ const getUserQuery = `
     FROM user_profile WHERE id = $1
 `
 
+const logoutQuery = `
+    INSERT INTO invalid ( token ) VALUES ( $1 )
+`
+
+const checkInvalidQuery = `
+    SELECT $1 = ANY(array( SELECT token FROM invalid )) AS is_invalid
+`
+
 const deleteUserQuery = ``
 
 module.exports = {
@@ -39,4 +47,6 @@ module.exports = {
     loginQuery,
     getUserQuery,
     deleteUserQuery,
+    logoutQuery,
+    checkInvalidQuery
 }

@@ -1,5 +1,7 @@
 const bcrypt = require('bcrypt');
+const postgres = require('../utils/postgres');
 const jwt = require('jsonwebtoken');
+const { checkInvalidQuery } = require('../queries/auth');
 
 const maxAge = 3 * 24 * 60 * 60
 
@@ -64,9 +66,11 @@ function validate(values) {
     return { failed: false }
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
     const userToken = req.cookies.userToken
     if (!userToken) return res.status(403).json({ message: 'You are not logged in' });
+    const result = await postgres.request({ query: checkInvalidQuery, values: [userToken] });
+    if(result[0]?.is_invalid) return res.status(403).json({ message: 'Invalid token' })
     jwt.verify(userToken, process.env.JWT_SEC, (err, decodedToken) => {
         if (err) {
             console.log(err.message);
