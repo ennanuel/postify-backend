@@ -13,7 +13,7 @@ const getUserQuery = `
         CARDINALITY(ARRAY( SELECT profile_pic FROM user_friends WHERE id = ANY (user_interests.friends) )) AS mutual_friends,
         CARDINALITY(user_interests.friends) AS user_friends,
         $1 = $2 AS is_user,
-        $1 = ANY(user_interests.friends) AS is_friend
+        $2 = ANY(user_interests.friends) AS is_friend
     FROM user_profile 
     JOIN user_interests ON user_profile.id = user_interests.id
     WHERE user_profile.id = $1
@@ -70,7 +70,7 @@ const getUserPostsQuery = (type) => `
         cardinality(array(SELECT id FROM comments WHERE post_id = posts.id)) AS post_comments, 
         cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL)) AS post_likes,
         cardinality(array(SELECT id FROM share WHERE post_id = posts.id)) AS shares,
-        cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $2)) AS liked_post,
+        cardinality(array(SELECT id FROM likes WHERE post_id = posts.id AND user_id = $2)) AS liked,
         date_posted,
         last_updated,
         posts.user_id,
@@ -152,7 +152,57 @@ const editUserQuery = `
     WHERE id = $1
 `;
 
-const deleteUserQuery = ``;
+const deleteUserQuery = `
+    WITH delete_cred AS (
+        DELETE FROM user_cred WHERE id = $1
+    ), delete_profile AS (
+        DELETE FROM user_profile WHERE id =$1
+        RETURNING profile_pic, cover
+    ), delete_interests AS (
+        DELETE FROM user_interests WHERE id = $1
+        RETURNING friends
+    ), delete_user_friends AS (
+        DELETE FROM friend_groups WHERE user_id = $1
+    ), remove_from_friend_group AS (
+        UPDATE friend_groups SET users = array_remove(users, $1) WHERE $1 = ANY(users)
+    ), remove_from_friends AS (
+        UPDATE user_interests SET friends = array_remove(friends, $1) WHERE $1 = ANY(friends)
+    ), delete_groups AS (
+        DELETE FROM groups WHERE creator = $1
+        RETURNING id AS group_id
+    ), remove_from_groups AS (
+        UPDATE groups SET members = array_remove(members, $1), invites = array_remove(invites, $1)
+        WHERE $1 = ANY(array_cat(invites, members))
+    ), delete_channels AS (
+        DELETE FROM channel WHERE creator = $1
+        RETURNING id AS channel_id
+    ), remove_from_channel AS (
+        UPDATE channel SET followers = array_remove(followers, $1)
+        WHERE $1 = ANY(followers)
+    ), delete_posts AS (
+        DELETE FROM posts WHERE user_id = $1 OR group_id = ANY(array(SELECT group_id FROM delete_groups))
+        RETURNING id AS post_id, files, post_type
+    ), delete_stories AS (
+        DELETE FROM story WHERE user_id = $1
+        RETURNING id AS story_id, file, story_type
+    ), delete_comments AS (
+        DELETE FROM comments WHERE post_id = ANY(array(SELECT post_id FROM delete_posts)) OR user_id = $1
+        RETURNING id AS comment_id
+    ), delete_replies AS (
+        DELETE FROM comments WHERE reply_to = ANY(array(SELECT comment_id FROM delete_comments))
+        RETURNING id AS reply_id
+    ), delete_likes AS (
+        DELETE FROM likes WHERE user_id = $1
+            OR post_id = ANY(array(SELECT post_id FROM delete_posts))
+            OR comment_id = ANY(array(SELECT comment_id FROM delete_comments))
+            OR comment_id = ANY(array(SELECT reply_id FROM delete_replies))
+    ) SELECT
+        array(SELECT unnest(files) FROM delete_posts WHERE NOT post_type = 'text') AS post_files,
+        array(SELECT file FROM delete_stories WHERE NOT story_type = 'text') AS story_files,
+        profile_pic AS picture,
+        cover
+    FROM delete_profile;
+`;
 
 module.exports = {
     getUserQuery,

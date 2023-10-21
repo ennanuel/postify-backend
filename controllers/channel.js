@@ -1,16 +1,18 @@
 const postgres = require('../utils/postgres');
-const { handleFiles, handleDelete } = require('../functions/group')
+const { handleFiles, handleDelete } = require('../functions/group');
 const {
     createChannelQuery,
     getChannelsQuery,
     getChannelInfoQuery,
-    followActionQuery,
     getChannelsFeedQuery,
     createChannelPostQuery,
     getChannelIdsQuery,
     editChannelQuery,
-    deleteChannelQuery
+    deleteChannelQuery,
+    followChannelQuery,
+    unFollowChannelQuery
 } = require('../queries/channel');
+const { io } = require('../utils/server');
 
 async function getChannels(req, res) {
     try {            
@@ -37,10 +39,10 @@ async function getChannelIds(req, res) {
 
 async function getChannelsFeed(req, res) {
     try {
-        const { channel_id } = req.params;
-        const { user_id, type } = req.query || {};
-        const result = await postgres.request({ values: [channel_id, user_id], query: getChannelsFeedQuery(type) })
-        return res.status(200).json(result)
+        const { channel_or_user_id } = req.params;
+        const { user_id, type } = req.query;
+        const result = await postgres.request({ values: [channel_or_user_id, user_id], query: getChannelsFeedQuery(type) });
+        return res.status(200).json(result);
     } catch (error) {
         console.log(error.message);
         return res.status(500).json({ message: error.message });
@@ -62,11 +64,14 @@ async function getChannelInfo(req, res) {
 async function createChannel(req, res) {
     try {
         const { name, user_id, channel_desc, tags, website, picture, cover } = req.body;
-        const values = [name, user_id, channel_desc, picture, cover, website, tags]
-        const result = await postgres.request({ values, query: createChannelQuery })
-        return res.status(200).json(result)
+        const values = [name, user_id, channel_desc, picture, cover, website, tags || []];
+        const result = await postgres.request({ values, query: createChannelQuery });
+        const createdChannel = result[0];
+        if (!createdChannel) throw Error('No new channel created');
+        io.emit('channel-event', createdChannel);
+        return res.status(200).json({ message: 'Channel Created!' })
     } catch (error) {
-        console.log(error.message);
+        console.error(error);
         return res.status(500).json({ message: error.message });
     }
 }
@@ -74,16 +79,40 @@ async function createChannel(req, res) {
 async function createChannelPost(req, res) {
     try {
         const { channel_id, user_id, post_desc, files } = req.body;
-        await postgres.request({ res, values: [channel_id, user_id, post_desc, files], query: createChannelPostQuery });
+        await postgres.request({ values: [channel_id, user_id, post_desc, files], query: createChannelPostQuery });
         return res.status(200).json({ message: 'Channel Created' });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: error.message })
+    }
+}
+
+async function followChannel(req, res) {
+    try {
+        const { user_id, channel_id } = req.body;
+        const result = await postgres.request({ query: followChannelQuery, values: [channel_id, user_id] });
+        const followedChannel = result[0];
+        if (!followedChannel) throw Error('no channels followed');
+        io.emit('channel-event', followedChannel);
+        res.status(200).json({ message: 'Channel followed' });
     } catch (error) {
         console.log(error.message);
         return res.status(500).json({ message: error.message })
     }
 }
 
-async function followAction({ socket, io, user_id, channel_id, type }) {
-    postgres.socket({ socket, io, values: [channel_id, user_id], query: followActionQuery(type), eventName: 'channel-event', extras: { user_id } })
+async function unFollowChannel(req, res) {
+    try {
+        const { user_id, channel_id } = req.body;
+        const result = await postgres.request({ query: unFollowChannelQuery, values: [channel_id, user_id] });
+        const followedChannel = result[0];
+        if (!followedChannel) throw Error('no channels unfollowed');
+        io.emit('channel-event', followedChannel);
+        res.status(200).json({ message: 'Channel unfollowed' });
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message })
+    }
 }
 
 async function editChannel(req, res) {
@@ -102,8 +131,8 @@ async function editChannel(req, res) {
 async function deleteChannel(req, res) { 
     try { 
         const { channel_id, user_id } = req.body;
-        const deleted_channel = await postgres.request({ query: deleteChannelQuery, values: [channel_id, user_id] });
-        if (deleted_channel?.length > 0) await handleDelete(deleted_channel[0]);
+        const [deleted_channel] = await postgres.request({ query: deleteChannelQuery, values: [channel_id, user_id] });
+        if (deleted_channel) await handleDelete(deleted_channel);
         return res.status(200).json({ message: 'Channel Deleted' })
     } catch (error) {
         console.log(error.message);
@@ -116,9 +145,10 @@ module.exports = {
     getChannelIds,
     getChannelsFeed,
     getChannelInfo,
+    followChannel,
+    unFollowChannel,
     createChannel,
     createChannelPost,
     editChannel,
     deleteChannel,
-    followAction,
 }

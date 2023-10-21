@@ -22,29 +22,36 @@ async function handleFiles(files) {
     return result;
 };
 
-async function handleDelete(deleted) {
-    if (!deleted) return;
-    const { picture, cover, files } = deleted
+const classifyPostFiles = (file) => ({
+    file,
+    folder: /.(jpg|png|jpeg)$/i.test(file) ? 'images/post_images' : /(.mp4)$/i.test(file) ? 'videos/post_videos' : null
+})
+
+const classifyStoryFiles = (file) => ({
+    file,
+    folder: /.(jpg|png|jpeg)$/i.test(file) ? 'images/stories' : /(.mp4)$/i.test(file) ? 'videos/stories' : 'text'
+})
+  
+async function handleDelete({ picture, cover, post_files = [], story_files = [] }) {
+    const posts = post_files.map(classifyPostFiles)
+    const stories = story_files.map(classifyStoryFiles)
     const to_delete = [
-        ...files.map((file, i) => (
-            { file, type: /.(jpg|png|jpeg)$/i.test(file) ? 'photo' : /(.mp4)$/i.test(file) ? 'video' : null }
-        )),
-        { file: picture, type: 'profile' },
-        { file: cover, type: 'cover' }
+        ...posts,
+        ...stories,
+        { file: picture, folder: 'images/profile_pics' },
+        { file: cover, folder: 'images/covers' }
     ]
-    for (let { type, file } of to_delete) {
-        if (type === 'text') continue;
-        const { fail, message } = await deleteFile(type, file);
+    for (let { folder, file } of to_delete) {
+        if (folder === 'text') continue;
+        const { fail, message } = await deleteFile(folder, file);
         if (fail) console.log('delete failed: %s', message);
         else console.log(message);
     }
 }
 
-async function deleteFile(type, file) {
-    if (!type || !file) return { fail: true, message: 'no arguments found' };
-    const filePath = /(video|photo)/.test(type) ?
-        path.join(__dirname, `../${type === 'video' ? 'videos/post_videos' : 'images/post_images'}/${file}`) :
-        path.join(__dirname, `../images/${type === 'profile' ? 'profile_pics' : 'covers'}/${file}`)
+async function deleteFile(folder, file) {
+    if (!folder || !file) return { fail: true, message: 'no arguments found' };
+    const filePath = path.join(__dirname, `../${folder}/${file}`)
     const exists = await fs.existsSync(filePath);
     if (!exists) return { fail: true, message: 'file doesn\'t exists' };
     await fs.unlinkSync(filePath);

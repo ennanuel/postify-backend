@@ -1,11 +1,61 @@
 const bcrypt = require('bcrypt');
 const postgres = require('../utils/postgres');
 const jwt = require('jsonwebtoken');
-const { checkInvalidQuery } = require('../queries/auth');
+const { checkInvalidQuery, findUserQuery } = require('../queries/auth');
 
 const maxAge = 3 * 24 * 60 * 60
 
-// Hashing the user's password
+function validateRegisterPassword({ password, confirm_password }) { 
+    const fieldIsEmpty = !password || password.length < 1 || !confirm_password || confirm_password.length < 1;
+    const doNotMatch = password !== confirm_password;
+    const isTooShort = password.length < 8;
+    const doesNotContainDigit = !/\d/.test(password);
+    const doesNotContainUppercase = !/[A-Z]/.test(password);
+    const doesNotContainSpecialChar = !/[^(a-z|0-9)]/i.test(password);
+
+    if (fieldIsEmpty) return { failed: true, key: 'password', message: 'field cannot be empty' };
+    else if (doNotMatch) return { failed: true, key: 'confirm_password', message: 'passwords don\'t match' };
+    else if (isTooShort) return { failed: true, key: 'password', message: 'password too short' };
+    else if (doesNotContainDigit) return { failed: true, key: 'password', message: 'password must contain at least one digit' };
+    else if (doesNotContainUppercase) return { failed: true, key: 'password', message: 'pasword must contain an uppercase letter' };
+    else if (doesNotContainSpecialChar) return { failed: true, key: 'password', message: 'Must contain a special Character' };
+    else return { failed: false };
+};
+async function validateRegisterEmail(email) {
+    const query = 'SELECT cardinality(array(SELECT email FROM user_profile WHERE email = $1)) > 0 AS found_user';
+    const result = await postgres.request({ query, values: [email] });
+    const username_exists = result[0] && result[0].found_user;
+    if (username_exists) return { failed: true, key: 'email', message: 'email already exists' };
+    return { failed: false };
+};
+async function validateRegisterUsername(username) {
+    const query = 'SELECT cardinality(array(SELECT username FROM user_profile WHERE username = $1)) > 0 AS found_user';
+    const result = await postgres.request({ query, values: [username] });
+    const username_exists = result[0] && result[0].found_user;
+    if (username_exists) return { failed: true, key: 'username', message: 'username already exists' };
+    return { failed: false };
+};
+function validateOtherRegisterValues(values) { 
+    for (let [key, value] of values) {
+        const refinedKey = key.split('_').join(' ')
+        if (!value || value.length < 1) return { failed: true, key, message: `${refinedKey} cannot be empty` };
+    };
+    return { failed: false };
+};
+async function validateRegisterValues(values) {
+    const { confirm_password, password, email, username, ...others } = values;
+    const otherValues = Object.entries(others);
+    const validateEmail = await validateRegisterEmail(email);
+    const validateUsername = await validateRegisterUsername(username);
+    const validatePassword = validateRegisterPassword({ password, confirm_password });
+    const validateOthers = validateOtherRegisterValues(otherValues);
+    if (validateEmail.failed) return validateEmail;
+    else if (validateUsername.failed) return validateUsername;
+    else if (validatePassword.failed) return validatePassword;
+    else if (validateOthers.failed) return validateOthers
+    else return { failed: false };
+};
+
 async function hashPassword(pword) {
     const salt = await bcrypt.genSalt();
     const password = await bcrypt.hash(pword, salt);
@@ -15,55 +65,6 @@ async function hashPassword(pword) {
 async function unhashPassword(pword, hashed) {
     const compare = await bcrypt.compare(pword, hashed)
     return compare
-}
-
-function validateName(value) {
-    const names = value.split(' ')
-    for (let name of names) {
-        if (!name || name.length < 1) return { failed: true, message: 'Name cannot be empty'}
-        if (name.length > 255) return { failed: true, message: "Name is too long" }
-    }
-    return { failed: false }
-}
-
-function validatePassword(pword) {
-    if (pword.length < 8) return { failed: true, msg: 'Must contain at least eight(8) characters' };
-    if (!/[A-Z]/.test(pword)) return { failed: true, msg: 'Must contain at least one(1) uppercase letter' };
-    if (!/\d/.test(pword)) return { failed: true, msg: 'Must contain at least one(1) number character' };
-    // Change this later
-    if (!/[^a-z|\D]/.test(pword)) return { failed: true, msg: 'Must contain special character (eg: !, #, @...)' };
-    return { failed: false }
-}
-
-function validateEmail(email) {
-    return { failed: false }
-}
-
-function validateUsername(uname) { 
-    return { failed: false }
-}
-
-function validate(values) {
-    for(let [key, value] of Object.entries(values)) {
-        if (!values || value === '') return { failed: true, msg: `${key} field cannot be empty.` };
-        let check = {};
-        switch (key) {
-            case 'name':
-                check = validateName(value);
-                break;
-            case 'email':
-                check = validateEmail(value)
-                break;
-            case 'username':
-                check = validateUsername(value);
-                break;
-            case 'password':
-                check = validatePassword(value);
-                break;
-        }
-        if (check.failed) return check;
-    }
-    return { failed: false }
 }
 
 async function authMiddleware(req, res, next) {
@@ -82,18 +83,23 @@ async function authMiddleware(req, res, next) {
     });
 }
 
-async function createToken({ res, secret, password, id, hashed }) {
-    if (!id) return { status: 403, message: 'No user found' };
-    const validate = await unhashPassword(password, hashed)
-    if (!validate) return { status: 403, message: 'Your password is wrong!' };
-    const userToken = jwt.sign({ id }, secret, { expiresIn: maxAge });
-    res.cookie('userToken', userToken, { httpOnly: true, secure: false, maxAge: maxAge * 1000 });
-    return { status: 200, message: 'User found', id };
+async function createToken({ jwt_secret_key, username, password }) {
+    if (!username || !password) return { failed: true, message: 'Fields cannot be empty' };
+    const find_user = await postgres.request({ query: findUserQuery, values: [username] });
+    const user_found = find_user[0];
+    if (!user_found) return { failed: true, message: 'Username or email doesn\'t exist' };
+    const { id, hashed_password } = user_found;
+    const validate = await unhashPassword(password, hashed_password);
+    if (!validate) return { failed: true, message: 'Your password is wrong' };
+    const userToken = jwt.sign({ id }, jwt_secret_key, { expiresIn: maxAge });
+    const options = { httpOnly: true, secure: false, maxAge: maxAge * 1000 };
+    const cookie = { userToken, options};
+    return { failed: false, cookie };
 };
 
 module.exports = {
     hashPassword,
-    validate,
     createToken,
-    authMiddleware
+    authMiddleware,
+    validateRegisterValues
 }

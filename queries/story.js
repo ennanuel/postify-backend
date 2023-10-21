@@ -47,13 +47,17 @@ const getStoryQuery = `
 
 const createStoryQuery = `
     INSERT INTO story ( id, user_id, story_desc, story_bg, story_type, file ) VALUES ( uuid_generate_v4(), $1, $2, $3, $4, $5 )
+    RETURNING user_id;
 `
 
-const deleteStoryQuery = ``
+const deleteStoryQuery = `
+    DELETE FROM story
+`
 
 const watchStoryQuery = `
     UPDATE story SET seen = array_append(seen, $2)
     WHERE id = $1 AND NOT (user_id = $2 OR $2 = ANY(seen))
+    RETURNING id AS story_id, user_id;
 `
 
 module.exports = {

@@ -1,5 +1,6 @@
 const postgres = require("../utils/postgres");
-const { getUserQuery, getFullUserQuery, getUserPostsQuery, getUserFriendsQuery, editUserQuery, getValuesQuery } = require('../queries/user')
+const { getUserQuery, getFullUserQuery, getUserPostsQuery, getUserFriendsQuery, editUserQuery, getValuesQuery, deleteUserQuery } = require('../queries/user');
+const { handleDelete } = require("../functions/group");
 
 async function getUser(req, res) {
     try {
@@ -61,31 +62,46 @@ async function getUserValues(req, res) {
 }
 
 async function editUserInfo(req, res) {
-    const {
-        user_id,
-        name,
-        username,
-        profile_pic,
-        cover,
-        bio,
-        email,
-        phone,
-        address,
-        country,
-        work_string,
-        education_string,
-        hobbies_string,
-        relationship_string
-    } = req.body;
-    const [work, education, hobbies, relationship] = [work_string, education_string, hobbies_string, relationship_string]
-        .map(elem => JSON.parse(elem));
-    const [first_name, last_name] = name.split(' ');
-    const values = [ user_id, first_name, last_name, username, profile_pic, cover, bio, email, phone, address, country, relationship, work, hobbies, education ]
-    await postgres.request({ values, query: editUserQuery });
-    return res.status(200).json({ message: 'Profile edited' })
+    try {            
+        const {
+            user_id,
+            name,
+            username,
+            profile_pic,
+            cover,
+            bio,
+            email,
+            phone,
+            address,
+            country,
+            work_string,
+            education_string,
+            hobbies_string,
+            relationship_string
+        } = req.body;
+        const [work, education, hobbies, relationship] = [work_string, education_string, hobbies_string, relationship_string]
+            .map(elem => JSON.parse(elem));
+        const [first_name, last_name] = name.split(' ');
+        const values = [ user_id, first_name, last_name, username, profile_pic, cover, bio, email, phone, address, country, relationship, work, hobbies, education ]
+        await postgres.request({ values, query: editUserQuery });
+        return res.status(200).json({ message: 'Profile edited' })
+    } catch (error) {        
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
 };
 
-async function deleteUser () {};
+async function deleteUser(req, res) {
+    try {
+        const { user_id } = req.body;
+        const [deleted_user] = await postgres.request({ query: deleteUserQuery, values: [user_id] });
+        if (deleted_user) await handleDelete(deleted_user);
+        return res.status(200).json({ message: 'User Deleted' });
+    } catch (error) {        
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
+};
 
 module.exports = {
     getUser,

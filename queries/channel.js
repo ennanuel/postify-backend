@@ -40,6 +40,7 @@ const getChannelInfoQuery = (type) => `
 const createChannelQuery = `
     INSERT INTO channel ( id, name, creator, channel_desc, picture, cover, website, tags )
     VALUES ( uuid_generate_v4(), $1, $2, $3, $4, $5, $6, $7 );
+    RETURNING id AS channel_id, creator AS user_id
 `
 
 const editChannelQuery = `
@@ -57,13 +58,20 @@ const createChannelPostQuery = `
     INSERT INTO posts (id, channel_id, user_id, post_desc, files) VALUES ( uuid_generate_v4(), $1, $2, $3, $4 )
 `
 
-const followActionQuery = (type) => `
+const followChannelQuery = `
     UPDATE channel
-        SET followers = ${ type === 'follow' ? 'array_append' : 'array_remove' }(followers, $2) 
+        SET followers = array_append(followers, $2) 
     WHERE id = $1 
-        AND creator != $2 
-        ${ type === 'follow' ? 'AND NOT $2 = ANY(followers)' : '' }
-    RETURNING id as channel_id
+        AND creator != $2 AND NOT $2 = ANY(followers)
+    RETURNING id AS channel_id, $2 AS user_id;
+`
+
+const unFollowChannelQuery = `
+    UPDATE channel
+        SET followers = array_remove(followers, $2) 
+    WHERE id = $1 
+        AND creator != $2
+    RETURNING id as channel_id, $2 AS user_id
 `
 
 const getChannelsFeedQuery = (type) => `
@@ -75,17 +83,23 @@ const getChannelsFeedQuery = (type) => `
         files[1] AS file,
         cardinality(array( SELECT id FROM likes WHERE post_id = posts.id AND comment_id IS NULL )) AS post_likes,
         cardinality(array( SELECT id FROM comments WHERE post_id = posts.id )) AS post_comments,
-        cardinality(array( SELECT id FROM likes WHERE user_id = $2 AND post_id = posts.id AND comment_id IS NULL )) > 0 AS liked,
         cardinality(array( SELECT id FROM share WHERE post_id = posts.id )) AS shares,
+        cardinality(array( SELECT id FROM likes WHERE user_id = $2 AND post_id = posts.id AND comment_id IS NULL )) > 0 AS liked,
         date_posted
     FROM posts
     JOIN channel ON channel.id = posts.channel_id
     WHERE
-    ${type === 'single' ?
-        'posts.channel_id = $1' :
-        `${type === 'explore' ? 'NOT' : ''} $1 = ANY (array_append(followers, creator))`
+    ${
+        type === 'single' ?
+        '$1 = posts.channel_id' :
+        type === 'following' ?
+            '$1 = ANY(array_append(followers, creator))' :
+            'NOT $1 = ANY(array_append(followers, creator))'
     }
-    ORDER BY post_likes DESC
+    
+    
+    
+    ORDER BY post_likes DESC;
 `;
 
 const deleteChannelQuery = `
@@ -102,7 +116,8 @@ const deleteChannelQuery = `
     ) SELECT 
         picture,
         cover,
-        array(SELECT unnest(files) FROM delete_posts) AS files
+        array(SELECT unnest(files) FROM delete_posts) AS post_files,
+        '{}'::varchar[] AS story_files
     FROM delete_channel;
 `
 
@@ -113,7 +128,8 @@ module.exports = {
     createChannelPostQuery,
     editChannelQuery,
     getChannelInfoQuery,
-    followActionQuery,
+    followChannelQuery,
+    unFollowChannelQuery,
     getChannelsFeedQuery,
     deleteChannelQuery
 }

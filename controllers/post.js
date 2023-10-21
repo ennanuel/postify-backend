@@ -1,13 +1,26 @@
 const path = require('path');
 const fs = require('fs');
-const { getFeedQuery, createPostQuery, getPostQuery, likePostQuery, unlikePostQuery, watchPostQuery, editPostQuery, deletePostQuery } = require('../queries/post');
+const {
+    getFeedQuery,
+    createPostQuery,
+    getPostQuery,
+    likePostQuery,
+    unlikePostQuery,
+    watchPostQuery,
+    editPostQuery,
+    deletePostQuery,
+    getNextPostsForChannelFollowingQuery,
+    getNextPostsForChannelQuery,
+    getNextPostsForChannelNotFollowingQuery
+} = require('../queries/post');
 const postgres = require('../utils/postgres');
-const { deleteFile } = require('../functions/group');
+const { handleDelete } = require('../functions/group');
+const { io } = require('../utils/server');
 
 async function getPost(req, res) {
     try {
         const { post_id } = req.params
-        const { user_id, type } = req.query || {}
+        const { user_id, type } = req.query
         const result = await postgres.request({ query: getPostQuery(type), values: [post_id, user_id] })
         return res.status(200).json(result[0]);
     } catch (error) {
@@ -27,18 +40,35 @@ async function getFeed(req, res) {
     }
 };
 
+async function getNextPost(req, res) {
+    try {
+        const { user_id, post_id } = req.params;
+        const { queueType, currentQueue } = req.query;
+        const queryType = ['single', 'following'].includes(queueType?.toLowerCase()) ? queueType.toLowerCase() : 'notfollowing';
+        const queueArray = currentQueue ? currentQueue.split(',') : [];
+        const QUERY_OPTIONS = {
+            single: { query: getNextPostsForChannelQuery, values: [post_id, queueArray] },
+            following: { query: getNextPostsForChannelFollowingQuery, values: [user_id, queueArray] },
+            notfollowing: { query: getNextPostsForChannelNotFollowingQuery, values: [user_id, queueArray] }
+        };
+        const { query, values } = QUERY_OPTIONS[queryType];
+        const result = await postgres.request({ query, values });
+        const { next_posts } = result[0];
+        return res.status(200).json(next_posts.slice(0, 2));
+    } catch (error) {
+        console.log(error.message);
+        return res.status(500).json({ message: error.message });
+    }
+}
+
 async function uploadPost(req, res) {
     try {
-        const { user_id, post_desc, group_id, post_type, post_bg, channel_id, type, post_files } = req.body
-        const values = [user_id, post_desc, post_type, post_bg, post_files];
-        if (type === 'group' && group_id) {
-            values.push(group_id, null);
-        } else if (type === 'channel' && channel_id) {
-            values.push(null, channel_id)
-        } else {
-            values.push(null, null)
-        }
-        await postgres.request({ query: createPostQuery, values })
+        const { user_id, post_desc, post_type, post_bg, post_files, channel_id, group_id } = req.body;
+        const values = [user_id, post_desc, post_type, post_bg, post_files, group_id, channel_id];
+        const result = await postgres.request({ query: createPostQuery, values });
+        const createdPost = result[0];
+        if (!createdPost) throw new Error('No new post created');
+        io.emit('post-event', createdPost);
         return res.status(200).json({ message: 'Post uploaded!' });
     } catch (error) {
         console.log(error.message);
@@ -77,10 +107,7 @@ async function deletePost(req, res) {
     try { 
         const { user_id, post_id } = req.body;
         const [post] = await postgres.request({ query: deletePostQuery, values: [post_id, user_id] });
-        if (post) {
-            const { files, post_type } = post;
-            if (files?.length > 0) await files.map(async (file) => { await deleteFile(post_type, file) });
-        }
+        if (post) await handleDelete(post);
         return res.status(200).json({ message: 'Post Deleted!' });
     } catch (error) {
         console.log(error.message)
@@ -92,24 +119,52 @@ async function watchPost(req, res) {
     try {
         const { user_id, post_id } = req.body;
         const result = await postgres.request({ query: watchPostQuery, values: [post_id, user_id] });
-        return res.status(200).json(result[0]);
+        const watchedPost = result[0];
+        if (!watchedPost) throw new Error('Could not watch video');
+        io.emit('watch-event', watchedPost);
+        res.status(200).json({ message: 'like removed' });
     } catch (error) {
         console.log(error.message)
         return res.status(500).json({ message: error.message })
     }
 }
 
-async function likePostSocket({ user_id, post_id, socket, io, type }) { 
-    const query = type === 'add' ? likePostQuery : unlikePostQuery
-    postgres.socket({ socket, io, query: query, values: [user_id, post_id], eventName: 'someone-liked', extras: { type }})
-};
+async function likePost(req, res) {
+    try {
+        const { user_id, post_id, } = req.body;
+        const result = await postgres.request({ query: likePostQuery, values: [user_id, post_id] });
+        const likedPost = result[0];
+        if (!likedPost) throw new Error('Could not like post');
+        io.emit('someone-liked', likedPost);
+        res.status(200).json({ message: 'comment liked' });
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message })
+    }
+}
+
+async function unlikePost(req, res) {
+    try {
+        const { user_id, post_id, } = req.body;
+        const result = await postgres.request({ query: unlikePostQuery, values: [user_id, post_id] });
+        const likedPost = result[0];
+        if (!likedPost) throw new Error('Could not unlike post');
+        io.emit('someone-liked', likedPost);
+        res.status(200).json({ message: 'like removed' });
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message })
+    }
+}
 
 module.exports = {
     getPost,
     getFeed,
+    getNextPost,
     uploadPost,
     editPost,
     deletePost,
     watchPost,
-    likePostSocket
+    likePost,
+    unlikePost
 }

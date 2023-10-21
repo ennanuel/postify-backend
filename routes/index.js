@@ -7,6 +7,7 @@ const notification = require('./notifications')
 const friend = require('./friends')
 const channel = require('./channels')
 const story = require('./stories')
+const search = require('./search');
 
 module.exports = {
     auth,
@@ -18,4 +19,5 @@ module.exports = {
     friend,
     channel,
     story,
+    search
 }

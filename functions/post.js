@@ -124,7 +124,8 @@ function uploadMiddleware(req, res, next) {
                 }
                 throw new Error(message)
             }
-            if (body.type === 'channel' && files.length !== 1) throw new Error('You have to post a video');
+            if (body.channel_id && files.length !== 1) throw new Error('You have to add a video file');
+            if (/photo|video/i.test(body.post_type && files.length < 1)) throw Error('You have to post a file');
             if (!check) throw new Error('Some fields are empty');
             if (!/photo|video/i.test(body.post_type)) req.body.post_files = [];
             next()

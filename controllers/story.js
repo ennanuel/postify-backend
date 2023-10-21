@@ -1,5 +1,6 @@
 const postgres = require('../utils/postgres');
-const { getStoriesQuery, getStoryQuery, createStoryQuery, deleteStoryQuery, watchStoryQuery } = require('../queries/story')
+const { getStoriesQuery, getStoryQuery, createStoryQuery, deleteStoryQuery, watchStoryQuery } = require('../queries/story');
+const { io } = require('../utils/server');
 
 async function getUserStories(req, res) {
     try { 
@@ -41,7 +42,10 @@ async function deleteStory(req, res) { }
 async function watchedStory(req, res) { 
     try {
         const { story_id, user_id } = req.body;
-        await postgres.request({ values: [story_id, user_id], query: watchStoryQuery });
+        const result = await postgres.request({ values: [story_id, user_id], query: watchStoryQuery });
+        const watchedStory = result[0];
+        if (!watchedStory) throw Error('No stories watched');
+        io.emit('story-event', watchedStory);
         return res.status(200).json({ message: 'Story watched' });
     } catch (error) {
         console.log(error.message);

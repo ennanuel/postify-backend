@@ -9,15 +9,15 @@ const createUserQuery = `
         INSERT INTO user_interests ( id ) SELECT userId FROM ins1
     ), ins4 AS (
         INSERT INTO friend_groups ( id, user_id, group_name, group_type, users )
-        SELECT uuid_generate_v4(), userId, 'received_requests', 'main', '{}' FROM ins1
+        SELECT uuid_generate_v4(), userId, 'received_requests', 'main', '{}'::uuid[] FROM ins1
     ) INSERT INTO friend_groups ( id, user_id, group_name, group_type, users )
-    SELECT uuid_generate_v4(), userId, 'sent_requests', 'main', '{}' FROM ins1;
+    SELECT uuid_generate_v4(), userId, 'sent_requests', 'main', '{}'::uuid[] FROM ins1;
 `;
 
-const loginQuery = `
+const findUserQuery = `
     SELECT 
         user_cred.id,
-        user_cred.password AS hashed
+        user_cred.password AS hashed_password
     FROM user_cred 
     JOIN user_profile ON user_profile.id = user_cred.id
     WHERE user_profile.email = $1 OR user_profile.username = $1;
@@ -44,7 +44,7 @@ const deleteUserQuery = ``
 
 module.exports = {
     createUserQuery,
-    loginQuery,
+    findUserQuery,
     getUserQuery,
     deleteUserQuery,
     logoutQuery,
